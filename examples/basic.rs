@@ -1,4 +1,4 @@
-// FILE PATH: maazdb-rs/examples/basic.rs
+// FILE PATH: maazdb-rs/examples/basic.rs  cargo run --example basic
 use maazdb_rs::MaazDB;
 use std::error::Error;
 

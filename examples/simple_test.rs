@@ -1,4 +1,4 @@
-// FILE PATH: src/examples/simple_test.rs
+// FILE PATH: examples/simple_test.rs
 
 // Import the client from the main library
 use maazdb_rs::MaazDB;
