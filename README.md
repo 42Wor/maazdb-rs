@@ -1,86 +1,66 @@
 
-
 # MaazDB-RS 🦀
 
 **The Official Rust SDK for MaazDB**
 
+[🌐 Official Website](https://maazdb.vercel.app/)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)
+![Rust](https://img.shields.io/badge/rust-1.70%2B-brightgreen.svg)
+![Security](https://img.shields.io/badge/security-TLS_1.3-green)
 
-`maazdb-rs` is a high-performance, asynchronous-capable Rust off driver for **MaazDB**. Built on top of `tokio` and `rustls`, it provides full TLS 1.3 encryption and a type-safe interface for interacting with your MaazDB instances.
-
-
+`maazdb-rs` is a high-performance Rust client library for interacting with the MaazDB engine. It implements the custom MaazDB binary protocol over a secure TLS 1.3 socket, allowing Rust applications to communicate with your database safely and efficiently with zero-cost abstractions.
 
 ## 📦 Installation
 
-Add `maazdb-rs` to your `Cargo.toml` dependencies.
+Add `maazdb-rs` to your `Cargo.toml`:
 
-
-### from crates
 ```toml
 [dependencies]
 maazdb-rs = "0.1.0"
 ```
-### Local Development (Using path)
-```toml
-[dependencies]
-maazdb-rs = { path = "../maazdb-rs" }
-tokio = { version = "1", features = ["full"] }
+
+Or via cargo:
+```bash
+cargo add maazdb-rs
 ```
 
-### From GitHub
-```toml
-[dependencies]
-maazdb-rs = { git = "https://github.com/42Wor/maazdb-rs" }
-```
-### from crates
-```toml
-[dependencies]
-maazdb-rs = "0.1.0"
-```
 ## 🛠 Quickstart
 
-Make sure your **MaazDB Server** is running on `127.0.0.1:8888` before running your code.
+Ensure your **MaazDB Server** is running on `127.0.0.1:8888`.
 
 ```rust
-use maazdb_rs::MaazDB;
-use std::error::Error;
+use maazdb_rs::{MaazDB, Result};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // 1. Establish Secure Session
+fn main() -> Result<()> {
+    // 1. Establish a Secure Connection
     let mut db = MaazDB::connect("127.0.0.1", 8888, "admin", "admin")?;
-    println!("✓ Connected to MaazDB Cluster via TLS 1.3");
+    println!("✓ Connected to MaazDB via TLS 1.3");
 
-    // 2. Data Definition
+    // 2. Execute SQL Commands
     db.query("CREATE DATABASE store_prod;")?;
     db.query("USE store_prod;")?;
-    db.query("CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT, email TEXT);")?;
+    db.query("CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);")?;
 
-    // 3. High-Speed Ingestion
-    db.query("INSERT INTO users (name, email) VALUES ('Maaz', 'dev@maazdb.io');")?;
+    // 3. Insert Data
+    db.query("INSERT INTO users (name) VALUES ('Maaz');")?;
     
-    // 4. Advanced Selection
-    let results = db.query("SELECT * FROM users WHERE name = 'Maaz';")?;
+    // 4. Fetch Results
+    let results = db.query("SELECT * FROM users;")?;
     println!("--- Query Results ---\n{}", results);
 
-    // 5. Safe Teardown
-    db.close();
     Ok(())
 }
 ```
 
-
-## 🧪 Testing
-
-To run the internal integration tests:
-
-```bash
-cargo run --example basic
-```
+## ✨ Features
+- **Zero-Cost Abstractions:** High-performance binary protocol handling.
+- **Memory Safe:** Built with 100% safe Rust.
+- **Secure:** Powered by `rustls` for modern TLS 1.3 support.
+- **Synchronous & Asynchronous:** Supports both blocking and `tokio`-based workflows.
 
 ## 📄 License
-
-MaazDB-RS is distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License.
 
 ---
-*Created with ❤️ by Maaz for the Rust ecosystem.*
+*Created with ❤️ for the Rust ecosystem.*
