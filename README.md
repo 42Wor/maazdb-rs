@@ -30,9 +30,10 @@ cargo add maazdb-rs
 Ensure your **MaazDB Server** is running on `127.0.0.1:8888`.
 
 ```rust
-use maazdb_rs::{MaazDB, Result};
+use maazdb_rs::MaazDB;
+use std::error::Error;
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     // 1. Establish a Secure Connection
     let mut db = MaazDB::connect("127.0.0.1", 8888, "admin", "admin")?;
     println!("✓ Connected to MaazDB via TLS 1.3");
