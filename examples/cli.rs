@@ -3,7 +3,7 @@
 use std::io::{self, Write};
 use std::fs;
 use maazdb_rs::MaazDB;
-use comfy_table::{Table, presets, Attribute, Cell, CellAlignment};
+use comfy_table::{Table, presets, Attribute, Cell};
 use colored::*;
 use serde_json::Value;
 
@@ -54,7 +54,7 @@ fn print_pretty_table(json_response: &str) -> bool {
 }
 
 /// Helper to send a single query using the SDK and print the response
-fn execute_query(db: &mut MaazDB, query: &str) -> bool {
+async fn execute_query(db: &MaazDB, query: &str) -> bool {
     let query = query.trim();
     if query.is_empty() { return true; }
     
@@ -68,14 +68,13 @@ fn execute_query(db: &mut MaazDB, query: &str) -> bool {
     
     if query_without_comments.is_empty() { return true; }
     
-    // Execute via SDK
-    match db.query(&query_without_comments) {
+    // Execute via SDK (Asynchronously)
+    match db.query(&query_without_comments).await {
         Ok(response) => {
             if !response.is_empty() {
                 // 1. Try to print as a pretty table (SELECT, SHOW, etc.)
                 if !print_pretty_table(&response) {
-                    // 2. If not a table, print as a success message (INSERT, UPDATE, etc.)
-                    // We assume non-JSON responses are success messages
+                    // 2. If not a table, print as a success message
                     println!("{}", response.green());
                 }
             }
@@ -88,13 +87,14 @@ fn execute_query(db: &mut MaazDB, query: &str) -> bool {
     }
 }
 
-fn main() {
-    // Clear screen for a fresh start (optional, works on most terminals)
+#[tokio::main]
+async fn main() {
+    // Clear screen for a fresh start
     print!("\x1B[2J\x1B[1;1H");
 
     println!("{}", "--------------------------------------------------".bright_blue());
-    println!("  {} v12.5", "MaazDB CLI".bold().cyan());
-    println!("  Powered by maazdb-rs");
+    println!("  {} v13.5", "MaazDB CLI".bold().cyan());
+    println!("  Powered by maazdb-rs (Multiplexed)");
     println!("  Type 'help' for commands or 'exit' to quit.");
     println!("{}", "--------------------------------------------------".bright_blue());
 
@@ -106,8 +106,8 @@ fn main() {
     print!("Connecting to {}:{} as {}... ", host, port, user);
     io::stdout().flush().unwrap();
 
-    match MaazDB::connect(host, port, user, pass) {
-        Ok(mut db) => {
+    match MaazDB::connect(host, port, user, pass).await {
+        Ok( db) => {
             println!("{}", "Success!".green().bold());
             println!("✓ Connected via TLS 1.3\n");
             
@@ -168,7 +168,7 @@ fn main() {
                                     if !clean_cmd.trim().is_empty() {
                                         // Print the query being run in a subtle color
                                         println!("{}", format!("Running: {}", clean_cmd.trim()).truecolor(100, 100, 100));
-                                        execute_query(&mut db, &clean_cmd);
+                                        execute_query(&db, &clean_cmd).await;
                                     }
                                 }
                                 println!("{}", "Script execution finished.".blue());
@@ -176,7 +176,7 @@ fn main() {
                             Err(e) => eprintln!("{} {}", "Failed to read file:".red(), e),
                         }
                     } else {
-                        execute_query(&mut db, &final_query);
+                        execute_query(&db, &final_query).await;
                     }
                 }
             }

@@ -1,9 +1,9 @@
 [package]
 name = "maazdb-rs"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2024"
 authors = ["Maaz Waheed"]
-description = "Official Rust driver for MaazDB"
+description = "Official Rust driver for MaazDB (Protocol v2.1)"
 license = "MIT"
 
 [dependencies]
@@ -12,7 +12,12 @@ rustls = { version = "0.21", features = ["dangerous_configuration"] }
 tokio-rustls = "0.24"
 byteorder = "1.4"
 anyhow = "1.0"
-comfy-table = "7.0"
-colored="2.0"
 serde_json = "1.0"
-#cargo run --example basic
+
+# table coloring
+colored = "2.0"
+comfy-table = "7.0" 
+
+# Cryptography for Protocol v2.1 Handshake
+hmac = "0.12"
+sha2 = "0.10"

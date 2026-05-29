@@ -1,17 +1,16 @@
 // FILE PATH: examples/test_sql.rs
 // =====================================================
 // MaazDB SQL Syntax Test Suite
-// Updated to handle manual result parsing
+// Updated to handle JSON aggregation result parsing
 // =====================================================
 
 use maazdb_rs::MaazDB;
-use std::thread;
 use std::time::Duration;
 
-fn execute_query(client: &mut MaazDB, query: &str, expected_success: bool) -> bool {
+async fn execute_query(client: &MaazDB, query: &str, expected_success: bool) -> bool {
     println!("Executing: {}", query);
 
-    match client.query(query) {
+    match client.query(query).await {
         Ok(msg) => {
             if msg.is_empty() {
                 println!("✓ Success: (No results)");
@@ -27,32 +26,52 @@ fn execute_query(client: &mut MaazDB, query: &str, expected_success: bool) -> bo
     }
 }
 
-// FIXED: Manually parse the result string into an f64
-fn execute_and_get_f64(client: &mut MaazDB, query: &str, expected_value: f64, tolerance: f64) -> bool {
+// Parses JSON table payload or falls back to plain-text parsing
+async fn execute_and_get_f64(client: &MaazDB, query: &str, expected_value: f64, tolerance: f64) -> bool {
     println!("Executing: {}", query);
 
-    match client.query(query) {
+    match client.query(query).await {
         Ok(result_str) => {
-            // MaazDB usually returns aggregates as a single string value or the last line of a table
-            // We trim and attempt to parse the numeric value
-            let cleaned_result = result_str
-                .lines()
-                .last() // Get the last line in case there are headers
-                .unwrap_or("")
-                .trim();
+            // Try parsing JSON table payload first
+            let actual_value = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result_str) {
+                if let Some(data_array) = v.get("data").and_then(|d| d.as_array()) {
+                    if let Some(first_row) = data_array.get(0).and_then(|r| r.as_array()) {
+                        if let Some(val_str) = first_row.get(0).and_then(|c| c.as_str()) {
+                            val_str.parse::<f64>().ok()
+                        } else if let Some(val_num) = first_row.get(0).and_then(|c| c.as_f64()) {
+                            Some(val_num)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // Fallback to old plain text line parsing if it's not structured JSON
+                result_str
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+            };
 
-            match cleaned_result.parse::<f64>() {
-                Ok(actual_value) => {
-                    if (actual_value - expected_value).abs() < tolerance {
-                        println!("✓ Result: {} (Expected: {})", actual_value, expected_value);
+            match actual_value {
+                Some(actual_val) => {
+                    if (actual_val - expected_value).abs() < tolerance {
+                        println!("✓ Result: {} (Expected: {})", actual_val, expected_value);
                         true
                     } else {
-                        println!("❌ Result: {} (Expected: {}) - Mismatch", actual_value, expected_value);
+                        println!("❌ Result: {} (Expected: {}) - Mismatch", actual_val, expected_value);
                         false
                     }
                 }
-                Err(_) => {
-                    println!("❌ Failed to parse result as f64: '{}'", cleaned_result);
+                None => {
+                    println!("❌ Failed to parse result as f64: '{}'", result_str.trim());
                     false
                 }
             }
@@ -64,29 +83,29 @@ fn execute_and_get_f64(client: &mut MaazDB, query: &str, expected_value: f64, to
     }
 }
 
-fn wait_for_server() -> Option<MaazDB> {
+async fn wait_for_server() -> Option<MaazDB> {
     for _ in 0..30 {
-        match MaazDB::connect("127.0.0.1", 8888, "admin", "admin") {
+        match MaazDB::connect("127.0.0.1", 8888, "admin", "admin").await {
             Ok(client) => {
                 println!("✓ Connected and authenticated to server");
                 return Some(client);
             }
             Err(_) => {
                 println!("Waiting for server to start...");
-                thread::sleep(Duration::from_secs(1));
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
     }
     None
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("==========================================");
-    println!("MAAZDB v12.1.0 - SQL Syntax Test Suite (Client Lib)");
+    println!("MAAZDB v2.0.0 - SQL Syntax Test Suite (Client Lib)");
     println!("==========================================");
 
-    // Wait for server to start and connect/authenticate
-    let mut client = match wait_for_server() {
+    let client = match wait_for_server().await {
         Some(c) => c,
         None => {
             eprintln!("❌ Could not connect to MaazDB server. Make sure it's running on port 8888.");
@@ -99,8 +118,8 @@ fn main() {
 
     // Test 1: Create Database
     println!("\n=== Test 1: Create Database ===");
-    execute_query(&mut client, "DROP DATABASE IF EXISTS testdb;", true); // Ensure clean slate
-    if execute_query(&mut client, "CREATE DATABASE testdb;", true) {
+    execute_query(&client, "DROP DATABASE IF EXISTS testdb;", true).await; // Ensure clean slate
+    if execute_query(&client, "CREATE DATABASE testdb;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -108,7 +127,7 @@ fn main() {
 
     // Test 2: Use Database
     println!("\n=== Test 2: Use Database ===");
-    if execute_query(&mut client, "USE testdb;", true) {
+    if execute_query(&client, "USE testdb;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -125,7 +144,7 @@ fn main() {
         created TIMESTAMP,
         uuid UUID
     );";
-    if execute_query(&mut client, create_table, true) {
+    if execute_query(&client, create_table, true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -142,7 +161,7 @@ fn main() {
     ];
 
     for insert in inserts {
-        if execute_query(&mut client, insert, true) {
+        if execute_query(&client, insert, true).await {
             passed += 1;
         } else {
             failed += 1;
@@ -151,7 +170,7 @@ fn main() {
 
     // Test 5: Select all rows
     println!("\n=== Test 5: SELECT * (all columns) ===");
-    if execute_query(&mut client, "SELECT * FROM users;", true) {
+    if execute_query(&client, "SELECT * FROM users;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -159,7 +178,7 @@ fn main() {
 
     // Test 6: Select specific columns
     println!("\n=== Test 6: SELECT specific columns ===");
-    if execute_query(&mut client, "SELECT name, age FROM users;", true) {
+    if execute_query(&client, "SELECT name, age FROM users;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -167,7 +186,7 @@ fn main() {
 
     // Test 7: WHERE clause with equality
     println!("\n=== Test 7: WHERE clause (equality) ===");
-    if execute_query(&mut client, "SELECT * FROM users WHERE name = 'Alice';", true) {
+    if execute_query(&client, "SELECT * FROM users WHERE name = 'Alice';", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -175,7 +194,7 @@ fn main() {
 
     // Test 8: WHERE clause with greater than
     println!("\n=== Test 8: WHERE clause (greater than) ===");
-    if execute_query(&mut client, "SELECT * FROM users WHERE age > 25;", true) {
+    if execute_query(&client, "SELECT * FROM users WHERE age > 25;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -183,7 +202,7 @@ fn main() {
 
     // Test 9: WHERE clause with AND
     println!("\n=== Test 9: WHERE clause with AND ===");
-    if execute_query(&mut client, "SELECT * FROM users WHERE age > 25 AND active = TRUE;", true) {
+    if execute_query(&client, "SELECT * FROM users WHERE age > 25 AND active = TRUE;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -191,7 +210,7 @@ fn main() {
 
     // Test 10: ORDER BY
     println!("\n=== Test 10: ORDER BY ===");
-    if execute_query(&mut client, "SELECT name, age FROM users ORDER BY age DESC;", true) {
+    if execute_query(&client, "SELECT name, age FROM users ORDER BY age DESC;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -199,7 +218,7 @@ fn main() {
 
     // Test 11: LIMIT and OFFSET
     println!("\n=== Test 11: LIMIT and OFFSET ===");
-    if execute_query(&mut client, "SELECT * FROM users ORDER BY id LIMIT 2 OFFSET 1;", true) {
+    if execute_query(&client, "SELECT * FROM users ORDER BY id LIMIT 2 OFFSET 1;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -207,14 +226,14 @@ fn main() {
 
     // Test 12: Update rows
     println!("\n=== Test 12: UPDATE rows ===");
-    if execute_query(&mut client, "UPDATE users SET salary = 55000.00 WHERE name = 'Alice';", true) {
+    if execute_query(&client, "UPDATE users SET salary = 55000.00 WHERE name = 'Alice';", true).await {
         passed += 1;
     } else {
         failed += 1;
     }
 
     // Verify update
-    if execute_query(&mut client, "SELECT name, salary FROM users WHERE name = 'Alice';", true) {
+    if execute_query(&client, "SELECT name, salary FROM users WHERE name = 'Alice';", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -222,7 +241,7 @@ fn main() {
 
     // Test 13: Delete rows
     println!("\n=== Test 13: DELETE rows ===");
-    if execute_query(&mut client, "DELETE FROM users WHERE name = 'Charlie';", true) {
+    if execute_query(&client, "DELETE FROM users WHERE name = 'Charlie';", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -236,7 +255,7 @@ fn main() {
         amount DOUBLE,
         FOREIGN KEY (user_id) REFERENCES users(id)
     );";
-    if execute_query(&mut client, create_orders, true) {
+    if execute_query(&client, create_orders, true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -244,7 +263,7 @@ fn main() {
 
     // Test 15: Insert with foreign key constraint
     println!("\n=== Test 15: Insert with FOREIGN KEY constraint ===");
-    if execute_query(&mut client, "INSERT INTO orders (user_id, amount) VALUES (1, 100.50);", true) {
+    if execute_query(&client, "INSERT INTO orders (user_id, amount) VALUES (1, 100.50);", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -252,7 +271,7 @@ fn main() {
 
     // Test 16: Should fail - invalid foreign key
     println!("\n=== Test 16: Should fail - invalid FOREIGN KEY ===");
-    if execute_query(&mut client, "INSERT INTO orders (user_id, amount) VALUES (999, 200.00);", true) {
+    if execute_query(&client, "INSERT INTO orders (user_id, amount) VALUES (999, 200.00);", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -260,7 +279,7 @@ fn main() {
 
     // Test 17: SHOW TABLES
     println!("\n=== Test 17: SHOW TABLES ===");
-    if execute_query(&mut client, "SHOW TABLES;", true) {
+    if execute_query(&client, "SHOW TABLES;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -268,7 +287,7 @@ fn main() {
 
     // Test 18: DESCRIBE TABLE
     println!("\n=== Test 18: DESCRIBE TABLE ===");
-    if execute_query(&mut client, "DESCRIBE users;", true) {
+    if execute_query(&client, "DESCRIBE users;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -276,27 +295,27 @@ fn main() {
 
     // Test 19: CREATE USER
     println!("\n=== Test 19: CREATE USER ===");
-    if execute_query(&mut client, "CREATE USER john PASSWORD 'secret123';", true) {
+    if execute_query(&client, "CREATE USER john PASSWORD 'secret123';", true).await {
         passed += 1;
     } else {
         failed += 1;
     }
 
-    // Test 20: Performance test - batch inserts
+    // Test 20: Performance - Batch Inserts
     println!("\n=== Test 20: Performance - Batch Inserts ===");
     let start = std::time::Instant::now();
-    execute_query(&mut client, "CREATE TABLE perf_test (id SERIAL PRIMARY KEY, data TEXT);", true);
+    execute_query(&client, "CREATE TABLE perf_test (id SERIAL PRIMARY KEY, data TEXT);", true).await;
     for i in 1..=10 {
         let query = format!("INSERT INTO perf_test (data) VALUES ('Data row {}');", i);
-        execute_query(&mut client, &query, true);
+        execute_query(&client, &query, true).await;
     }
     let duration = start.elapsed();
     println!("✓ 10 inserts took: {:?}", duration);
     passed += 1;
 
-    // Test 21: SMART SELECT optimization (Primary Key lookup)
+    // Test 21: SMART SELECT (Primary Key O(1) lookup)
     println!("\n=== Test 21: SMART SELECT (Primary Key O(1) lookup) ===");
-    if execute_query(&mut client, "SELECT * FROM users WHERE id = 1;", true) {
+    if execute_query(&client, "SELECT * FROM users WHERE id = 1;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -304,7 +323,7 @@ fn main() {
 
     // Test 22: Expression SELECT
     println!("\n=== Test 22: Expression SELECT ===");
-    if execute_query(&mut client, "SELECT 1 + 1, 'Hello', TRUE;", true) {
+    if execute_query(&client, "SELECT 1 + 1, 'Hello', TRUE;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -315,21 +334,21 @@ fn main() {
     let tolerance = 0.001; 
 
     // Test 23a: COUNT(*)
-    if execute_and_get_f64(&mut client, "SELECT COUNT(*) FROM users;", 4.0, tolerance) {
+    if execute_and_get_f64(&client, "SELECT COUNT(*) FROM users;", 4.0, tolerance).await {
         passed += 1;
     } else {
         failed += 1;
     }
 
     // Test 23b: SUM(salary)
-    if execute_and_get_f64(&mut client, "SELECT SUM(salary) FROM users;", 200000.75, tolerance) {
+    if execute_and_get_f64(&client, "SELECT SUM(salary) FROM users;", 200000.75, tolerance).await {
         passed += 1;
     } else {
         failed += 1;
     }
 
     // Test 23c: AVG(age)
-    if execute_and_get_f64(&mut client, "SELECT AVG(age) FROM users;", 28.75, tolerance) {
+    if execute_and_get_f64(&client, "SELECT AVG(age) FROM users;", 28.75, tolerance).await {
         passed += 1;
     } else {
         failed += 1;
@@ -337,7 +356,7 @@ fn main() {
 
     // Test 24: DROP TABLE
     println!("\n=== Test 24: DROP TABLE ===");
-    if execute_query(&mut client, "DROP TABLE perf_test;", true) {
+    if execute_query(&client, "DROP TABLE perf_test;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -345,7 +364,7 @@ fn main() {
 
     // Test 25: SHOW DATABASES
     println!("\n=== Test 25: SHOW DATABASES ===");
-    if execute_query(&mut client, "SHOW DATABASES;", true) {
+    if execute_query(&client, "SHOW DATABASES;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -353,7 +372,7 @@ fn main() {
 
     // Test 26: Backup command
     println!("\n=== Test 26: BACKUP command ===");
-    if execute_query(&mut client, "BACKUP 'test_backup';", true) {
+    if execute_query(&client, "BACKUP 'test_backup';", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -361,7 +380,7 @@ fn main() {
 
     // Test 27: Complex WHERE with multiple conditions
     println!("\n=== Test 27: Complex WHERE with multiple conditions ===");
-    if execute_query(&mut client, "SELECT * FROM users WHERE (age > 20 AND active = TRUE) OR salary > 50000;", true) {
+    if execute_query(&client, "SELECT * FROM users WHERE (age > 20 AND active = TRUE) OR salary > 50000;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -369,8 +388,8 @@ fn main() {
 
     // Test 28: Multiple Row Insert
     println!("\n=== Test 28: Multiple Row Insert ===");
-    execute_query(&mut client, "CREATE TABLE batch_test (id SERIAL PRIMARY KEY, name TEXT, score INT);", true);
-    if execute_query(&mut client, "INSERT INTO batch_test (name, score) VALUES ('Player1', 100), ('Player2', 200), ('Player3', 300);", true) {
+    execute_query(&client, "CREATE TABLE batch_test (id SERIAL PRIMARY KEY, name TEXT, score INT);", true).await;
+    if execute_query(&client, "INSERT INTO batch_test (name, score) VALUES ('Player1', 100), ('Player2', 200), ('Player3', 300);", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -378,8 +397,8 @@ fn main() {
 
     // Test 29: INSERT INTO ... SELECT
     println!("\n=== Test 29: INSERT INTO ... SELECT ===");
-    execute_query(&mut client, "CREATE TABLE archive_test (id SERIAL PRIMARY KEY, name TEXT, score INT);", true);
-    if execute_query(&mut client, "INSERT INTO archive_test (name, score) SELECT name, score FROM batch_test WHERE score > 150;", true) {
+    execute_query(&client, "CREATE TABLE archive_test (id SERIAL PRIMARY KEY, name TEXT, score INT);", true).await;
+    if execute_query(&client, "INSERT INTO archive_test (name, score) SELECT name, score FROM batch_test WHERE score > 150;", true).await {
         passed += 1;
     } else {
         failed += 1;
@@ -387,8 +406,8 @@ fn main() {
 
     // Test 30: DROP DATABASE (cleanup)
     println!("\n=== Test 30: DROP DATABASE (cleanup) ===");
-    execute_query(&mut client, "USE system;", true);
-    if execute_query(&mut client, "DROP DATABASE testdb;", true) {
+    execute_query(&client, "USE system;", true).await;
+    if execute_query(&client, "DROP DATABASE testdb;", true).await {
         passed += 1;
     } else {
         failed += 1;

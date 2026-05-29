@@ -1,14 +1,12 @@
 // FILE PATH: examples/simple_test.rs
 
-// Import the client from the main library
 use maazdb_rs::MaazDB;
-use std::thread;
 use std::time::Duration;
 
-fn execute_query(client: &mut MaazDB, query: &str, expected_success: bool) -> bool {
+async fn execute_query(client: &MaazDB, query: &str, expected_success: bool) -> bool {
     println!("Executing: {}", query);
 
-    match client.query(query) {
+    match client.query(query).await {
         Ok(msg) => {
             if msg.is_empty() {
                 println!("✓ Success: (No results)");
@@ -24,32 +22,31 @@ fn execute_query(client: &mut MaazDB, query: &str, expected_success: bool) -> bo
     }
 }
 
-fn wait_for_server() -> Option<MaazDB> {
+async fn wait_for_server() -> Option<MaazDB> {
     println!("Attempting to connect to MaazDB Secure Server...");
     for i in 0..10 {
-        // Connects using TLS automatically via client.rs
-        match MaazDB::connect("127.0.0.1", 8888, "admin", "admin") {
+        match MaazDB::connect("127.0.0.1", 8888, "admin", "admin").await {
             Ok(client) => {
                 println!("✓ Connected and authenticated securely.");
                 return Some(client);
             }
             Err(e) => {
                 println!("Attempt {}: Failed ({:?})", i+1, e);
-                thread::sleep(Duration::from_millis(1000));
+                tokio::time::sleep(Duration::from_millis(1000)).await;
             }
         }
     }
     None
 }
 
-
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("==========================================");
-    println!("MAAZDB v11.7.1 - Simple SQL Test (Client Lib)");
+    println!("MAAZDB v2.0.0 - Simple SQL Test (Client Lib)");
     println!("==========================================");
 
     // Wait for server to start and connect/authenticate
-    let mut client = match wait_for_server() {
+    let client = match wait_for_server().await {
         Some(c) => c,
         None => {
             eprintln!("❌ Could not connect to MaazDB server.");
@@ -60,17 +57,17 @@ fn main() {
     let mut passed = 0;
     let mut total = 0;
 
-    // Test 1: Create Database (Login is handled by MaazDB::connect)
+    // Test 1: Create Database
     println!("\n=== Test 1: Create Database ===");
     total += 1;
-    if execute_query(&mut client, "CREATE DATABASE testdb;", true) {
+    if execute_query(&client, "CREATE DATABASE testdb;", true).await {
         passed += 1;
     }
 
     // Test 2: Use Database
     println!("\n=== Test 2: Use Database ===");
     total += 1;
-    if execute_query(&mut client, "USE testdb;", true) {
+    if execute_query(&client, "USE testdb;", true).await {
         passed += 1;
     }
 
@@ -78,10 +75,10 @@ fn main() {
     println!("\n=== Test 3: Create Simple Table ===");
     total += 1;
     if execute_query(
-        &mut client,
+        &client,
         "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT, age INT);",
         true,
-    ) {
+    ).await {
         passed += 1;
     }
 
@@ -95,7 +92,7 @@ fn main() {
 
     for insert in inserts {
         total += 1;
-        if execute_query(&mut client, insert, true) {
+        if execute_query(&client, insert, true).await {
             passed += 1;
         }
     }
@@ -103,14 +100,14 @@ fn main() {
     // Test 5: Select all rows
     println!("\n=== Test 5: SELECT * ===");
     total += 1;
-    if execute_query(&mut client, "SELECT * FROM users;", true) {
+    if execute_query(&client, "SELECT * FROM users;", true).await {
         passed += 1;
     }
 
     // Test 6: Select with WHERE
     println!("\n=== Test 6: SELECT with WHERE ===");
     total += 1;
-    if execute_query(&mut client, "SELECT name FROM users WHERE age > 25;", true) {
+    if execute_query(&client, "SELECT name FROM users WHERE age > 25;", true).await {
         passed += 1;
     }
 
@@ -118,17 +115,17 @@ fn main() {
     println!("\n=== Test 7: UPDATE ===");
     total += 1;
     if execute_query(
-        &mut client,
+        &client,
         "UPDATE users SET age = 31 WHERE name = 'Alice';",
         true,
-    ) {
+    ).await {
         passed += 1;
     }
 
     // Test 8: Verify Update
     println!("\n=== Test 8: Verify Update ===");
     total += 1;
-    if execute_query(&mut client, "SELECT age FROM users WHERE name = 'Alice';", true) {
+    if execute_query(&client, "SELECT age FROM users WHERE name = 'Alice';", true).await {
         passed += 1;
     }
 
@@ -136,45 +133,45 @@ fn main() {
     println!("\n=== Test 9: DELETE ===");
     total += 1;
     if execute_query(
-        &mut client,
+        &client,
         "DELETE FROM users WHERE name = 'Charlie';",
         true,
-    ) {
+    ).await {
         passed += 1;
     }
 
     // Test 10: Verify Delete
     println!("\n=== Test 10: Verify Delete ===");
     total += 1;
-    if execute_query(&mut client, "SELECT COUNT(*) FROM users;", true) {
+    if execute_query(&client, "SELECT COUNT(*) FROM users;", true).await {
         passed += 1;
     }
 
     // Test 11: SHOW TABLES
     println!("\n=== Test 11: SHOW TABLES ===");
     total += 1;
-    if execute_query(&mut client, "SHOW TABLES;", true) {
+    if execute_query(&client, "SHOW TABLES;", true).await {
         passed += 1;
     }
 
     // Test 12: DESCRIBE TABLE
     println!("\n=== Test 12: DESCRIBE TABLE ===");
     total += 1;
-    if execute_query(&mut client, "DESCRIBE users;", true) {
+    if execute_query(&client, "DESCRIBE users;", true).await {
         passed += 1;
     }
 
     // Test 13: DROP TABLE
     println!("\n=== Test 13: DROP TABLE ===");
     total += 1;
-    if execute_query(&mut client, "DROP TABLE users;", true) {
+    if execute_query(&client, "DROP TABLE users;", true).await {
         passed += 1;
     }
 
     // Test 14: DROP DATABASE
     println!("\n=== Test 14: DROP DATABASE ===");
     total += 1;
-    if execute_query(&mut client, "DROP DATABASE testdb;", true) {
+    if execute_query(&client, "DROP DATABASE testdb;", true).await {
         passed += 1;
     }
 

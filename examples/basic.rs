@@ -1,12 +1,15 @@
-// FILE PATH: maazdb-rs/examples/basic.rs  cargo run --example basic
+// FILE PATH: maazdb-rs/examples/basic.rs
+// Run with: cargo run --example basic
+
 use maazdb_rs::MaazDB;
 use std::error::Error;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    println!("--- MaazDB Official Rust SDK Example ---");
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    println!("--- MaazDB Official Rust SDK v2.0.0 Example ---");
 
-    // 1. Connect (TLS is automatic)
-    let mut db = match MaazDB::connect("127.0.0.1", 8888, "admin", "admin") {
+    // 1. Connect (TLS and HMAC-SHA256 Handshake are automatic)
+    let db = match MaazDB::connect("127.0.0.1", 8888, "admin", "admin").await {
         Ok(client) => {
             println!("✓ Secure TLS 1.3 connection established");
             client
@@ -17,36 +20,42 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    // Helper to print server responses
-    let run = |client: &mut MaazDB, sql: &str| -> Result<(), Box<dyn Error>> {
-        println!("Executing: {}", sql);
-        let resp = client.query(sql)?;
-        println!("Server: {}", resp.trim());
-        Ok(())
-    };
-
     // 2. Setup Database
-    run(&mut db, "CREATE DATABASE demo_db;")?;
-    run(&mut db, "USE demo_db;")?;
+    println!("Executing: CREATE DATABASE demo_db;");
+    let _ = db.query("CREATE DATABASE demo_db;").await;
     
-    // 3. Create Table       
-    run(&mut db, "CREATE TABLE products (id SERIAL PRIMARY KEY, name TEXT, price INT);")?;
+    println!("Executing: USE demo_db;");
+    db.query("USE demo_db;").await?;
+    
+    println!("Executing: CREATE TABLE products...");
+    db.query("CREATE TABLE products (id SERIAL PRIMARY KEY, name TEXT, price INT);").await?;
 
-    // 4. Insert Data
-    run(&mut db, "INSERT INTO products (name, price) VALUES ('Laptop', 1200);")?;
-    run(&mut db, "INSERT INTO products (name, price) VALUES ('Smartphone', 800);")?;
+    // 3. Insert Data (We can now do this concurrently!)
+    println!("Inserting data concurrently...");
+    let db_clone1 = db.clone();
+    let db_clone2 = db.clone();
 
-    // 5. Query
+    let task1 = tokio::spawn(async move {
+        db_clone1.query("INSERT INTO products (name, price) VALUES ('Laptop', 1200);").await
+    });
+
+    let task2 = tokio::spawn(async move {
+        db_clone2.query("INSERT INTO products (name, price) VALUES ('Smartphone', 800);").await
+    });
+
+    // Wait for both inserts to finish
+    let _ = tokio::try_join!(task1, task2)?;
+
+    // 4. Query
     println!("\n--- Fetching Data ---");
-    let results = db.query("SELECT * FROM products;")?;
+    let results = db.query("SELECT * FROM products;").await?;
     println!("{}", results);
 
-    // 6. Cleanup
+    // 5. Cleanup
     println!("--- Cleaning Up ---");
-    run(&mut db, "DROP TABLE products;")?;
-    run(&mut db, "DROP DATABASE demo_db;")?;
+    db.query("DROP TABLE products;").await?;
+    db.query("DROP DATABASE demo_db;").await?;
 
-    db.close();
     println!("\nDone.");
     Ok(())
 }
