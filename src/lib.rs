@@ -139,7 +139,7 @@ impl MaazDB {
         let addr = format!("{}:{}", host, port);
         
         let sock = TcpStream::connect(&addr).await?;
-
+        sock.set_nodelay(true)?;
         let config = ClientConfig::builder()
             .with_safe_defaults()
             .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
